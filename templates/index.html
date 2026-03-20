@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CineMatch | Advanced Movie Recommendations</title>
+    <!-- Modern Typography -->
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <!-- FontAwesome for Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+    <div class="background-overlay"></div>
+    <div class="blob blob-1"></div>
+    <div class="blob blob-2"></div>
+    <div class="blob blob-3"></div>
+
+    <main class="container">
+        <header class="glass-header">
+            <h1>Cine<span>Match</span></h1>
+            <p>Discover your next favorite cinematic experience.</p>
+        </header>
+
+        <section class="search-section glass-panel">
+            <form id="search-form" autocomplete="off">
+                <div class="input-container">
+                    <i class="fas fa-search search-icon"></i>
+                    <input type="text" id="movie-input" placeholder="Type a movie you love..." aria-label="Search movies">
+                    <ul id="autocomplete-list" class="autocomplete-items"></ul>
+                </div>
+                <button type="submit" id="recommend-btn" class="glow-btn">
+                    <span>Show Matches <i class="fas fa-magic"></i></span>
+                </button>
+            </form>
+        </section>
+
+        <!-- Loader -->
+        <div id="loader" class="loader-container hidden">
+            <div class="spinner"></div>
+            <p>Analyzing genres, actors, and directors...</p>
+        </div>
+
+        <section id="results-section" class="results-section hidden">
+            <h2><i class="fas fa-film"></i> Curated Matches For You</h2>
+            <div id="movies-grid" class="movies-grid">
+                <!-- Movie cards inserted via JS -->
+            </div>
+        </section>
+    </main>
+
+    <script>
+        const input = document.getElementById("movie-input");
+        const submitBtn = document.getElementById("recommend-btn");
+        const listDiv = document.getElementById("autocomplete-list");
+        const resultsSection = document.getElementById("results-section");
+        const grid = document.getElementById("movies-grid");
+        const loader = document.getElementById("loader");
+
+        let selectedMovieId = null;
+
+        // Dynamic API Autocomplete logic
+        input.addEventListener("input", async function() {
+            let val = this.value;
+            listDiv.innerHTML = "";
+            selectedMovieId = null; // Reset selection if typing starts
+            
+            if (!val || val.length < 2) { return false; }
+            
+            try {
+                const res = await fetch(`/api/search?q=${encodeURIComponent(val)}`);
+                const data = await res.json();
+                const matches = data.results || [];
+
+                matches.forEach(match => {
+                    let currItem = document.createElement("li");
+                    const titleText = match.release_date ? `${match.title} (${match.release_date})` : match.title;
+                    
+                    // Highlight logic
+                    const regex = new RegExp(`(${val})`, 'gi');
+                    currItem.innerHTML = titleText.replace(regex, "<strong>$1</strong>");
+                    
+                    currItem.addEventListener("click", function(e) {
+                        input.value = titleText;
+                        selectedMovieId = match.id;
+                        listDiv.innerHTML = "";
+                    });
+                    
+                    listDiv.appendChild(currItem);
+                });
+            } catch (err) {
+                console.error("Autocomplete Error: ", err);
+            }
+        });
+
+        // Close dropdown when clicking outside
+        document.addEventListener("click", function (e) {
+            if(e.target !== input) {
+                listDiv.innerHTML = "";
+            }
+        });
+
+        document.getElementById("search-form").addEventListener("submit", async function(e) {
+            e.preventDefault();
+            
+            if(!selectedMovieId) {
+                alert("Please select a movie from the dropdown list first.");
+                return;
+            }
+
+            // Show loader
+            resultsSection.classList.add("hidden");
+            loader.classList.remove("hidden");
+            
+            // Disable button
+            submitBtn.classList.add("loading");
+            submitBtn.disabled = true;
+
+            try {
+                const res = await fetch("/recommend", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ movie_id: selectedMovieId })
+                });
+
+                if(!res.ok) {
+                    throw new Error("Unable to fetch recommendations");
+                }
+
+                const data = await res.json();
+                
+                if(data.error) {
+                    alert(data.error);
+                } else {
+                    renderMovies(data);
+                }
+            } catch(error) {
+                console.error(error);
+                alert("Something went wrong viewing matches.");
+            } finally {
+                loader.classList.add("hidden");
+                submitBtn.classList.remove("loading");
+                submitBtn.disabled = false;
+            }
+        });
+
+        function renderMovies(data) {
+            grid.innerHTML = "";
+            
+            if(!data.movies || data.movies.length === 0) {
+                grid.innerHTML = "<p>No recommendations found for this movie.</p>";
+                return;
+            }
+
+            data.movies.forEach((m, index) => {
+                const card = document.createElement("div");
+                card.className = "movie-card glass-panel";
+                
+                // Add staggered animation delay
+                card.style.animationDelay = `${index * 0.1}s`;
+
+                card.innerHTML = `
+                    <div class="poster-container">
+                        <img src="${m.poster}" alt="${m.title} Poster" loading="lazy" onerror="this.src='/static/netflix-cover.jpg'">
+                        <div class="rating-badge">
+                            <i class="fas fa-star"></i> ${m.rating ? m.rating.toFixed(1) : "N/A"}
+                        </div>
+                    </div>
+                    <div class="card-content">
+                        <h3>${m.title}</h3>
+                        ${m.platforms && m.platforms.length > 0 ? `<p class="providers" style="font-size:0.9rem; color:#8b949e; margin-top:5px;">On: <strong style="color:#58a6ff">${m.platforms.join(', ')}</strong></p>` : ''}
+                        ${m.watch_link ? `<a href="${m.watch_link}" target="_blank" class="glow-btn" style="margin-top: 15px; padding: 10px 15px; font-size: 0.95rem; text-decoration: none;">Watch Now <i class="fas fa-play"></i></a>` : ''}
+                    </div>
+                `;
+                grid.appendChild(card);
+            });
+            resultsSection.classList.remove("hidden");
+            
+            // Scroll to results
+            setTimeout(() => {
+                resultsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }, 100);
+        }
+    </script>
+</body>
+</html>
